@@ -1,0 +1,23 @@
+{
+  "cmd": [
+    "ffmpeg",
+    "-f", "v4l2",
+    "-input_format", "nv12",
+    "-framerate", "30",
+    "-video_size", "1920x1440",
+    "-i", "/dev/video0",
+    "-vf", "fps=30",
+    "-c:v", "h264_rkmpp",
+    "-profile:v", "main",
+    "-level", "4.2",
+    "-rc_mode", "CBR",
+    "-b:v", "1M",
+    "-g", "15",
+    "-bufsize", "1M",
+    "-flags", "low_delay",
+    "-tune", "zerolatency",
+    "-preset", "ultrafast",
+    "-f", "rtsp",
+    "rtsp://0.0.0.0:8554/stream"
+  ]
+}

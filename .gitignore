@@ -1,0 +1,6 @@
+/__pycache__/
+*.py[cod]
+/rtsp/mediamtx
+/certs
+/logs
+/.vscode

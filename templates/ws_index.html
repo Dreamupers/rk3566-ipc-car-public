@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Your Car</title>
+    <meta name="theme-color" content="#f3f4f6">
+    <!-- <link rel="manifest" href="/manifest.webmanifest?v=20251011a"> -->
+    <meta name="color-scheme" content="light">
+    <link rel="icon" href="/favicon.ico">
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+        input[type="range"].toggle {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 60px;
+            height: 24px;
+            border-radius: 12px;
+            outline: none;
+        }
+        input[type="range"].toggle::-webkit-slider-runnable-track {
+            background: #d3d3d3;
+            height: 24px;
+            border-radius: 12px;
+            transition: background 0.2s;
+        }
+        input[type="range"].toggle::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 24px;
+            height: 24px;
+            background: #fff;
+            border-radius: 50%;
+            cursor: pointer;
+            margin-top: 0;
+            box-shadow: 0 0 2px rgba(0,0,0,0.5);
+        }
+        input[type="range"].toggle.on::-webkit-slider-runnable-track {
+            background: #10b981;
+        }
+        .ws-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 4px;
+        }
+        .ws-indicator.connected {
+            background-color: #10b981; /* Tailwind green-500 */
+        }
+        .ws-indicator.disconnected {
+            background-color: #ef4444; /* Tailwind red-500 */
+        }
+        .ws-indicator.error {
+            background-color: #f97316; /* Tailwind orange-500 */
+        }
+        /* Toast 样式 */
+        .toast-container {
+            position: fixed;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column-reverse;
+            gap: 8px;
+            pointer-events: none;
+        }
+        .toast {
+            min-width: 180px;
+            max-width: 80vw;
+            padding: 10px 14px;
+            border-radius: 8px;
+            color: #fff;
+            background: rgba(17,24,39,0.9); /* gray-900 */
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
+            font-size: 14px;
+            line-height: 1.4;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            pointer-events: auto;
+            opacity: 0;
+            transform: translateY(8px);
+            transition: opacity 150ms ease, transform 150ms ease;
+            text-align: center;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .toast-success { background: rgba(16,185,129,0.95); }
+        .toast-error { background: rgba(239,68,68,0.95); }
+        .toast-warn { background: rgba(245,158,11,0.95); }
+        .toast-info { background: rgba(59,130,246,0.95); }
+        /* 视频占位与比例（1920x1440 -> 4:3），在未播放前保持尺寸并显示浅色底 */
+        #video {
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            background: #e5e7eb;
+            object-fit: contain;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center min-h-screen p-4" oncontextmenu="return false;">
+    <!-- Toast 容器 -->
+    <div id="toast-root" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+    <div class="w-full max-w-2xl mb-4 relative rounded-lg shadow-md overflow-hidden">
+        <video id="video" class="w-full block" muted></video>
+        <div id="video-placeholder" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <img src="/static/icon_256.png" alt="placeholder" class="w-24 h-24 opacity-80">
+        </div>
+        <!-- 码率选择（右上角，半透明） -->
+        <div class="absolute top-0 right-0 m-2">
+            <label for="bitrate_select" class="sr-only">码率</label>
+            <select id="bitrate_select" class="text-xs bg-black/40 text-white px-2 py-1 rounded-md backdrop-blur-sm"
+                    onchange="onBitrateChange(this)" title="选择视频码率">
+                <option value="1">1 Mbps</option>
+                <option value="2">2 Mbps</option>
+                <option value="4">4 Mbps</option>
+                <option value="8">8 Mbps</option>
+            </select>
+        </div>
+        <div class="absolute inset-x-0 bottom-0 pb-2 pt-2 bg-black/40 flex justify-center gap-4 md:gap-6">
+            <button id="toggle_stream" class="bg-green-500 text-white p-2 rounded-lg active:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center" aria-label="打开摄像头" onclick="toggleStream()">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                    <polygon points="9,6 19,12 9,18"></polygon>
+                </svg>
+            </button>
+            <button id="snapshot" class="bg-blue-500 text-white p-2 rounded-lg active:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center" aria-label="截图" onclick="takeSnapshot()" disabled>
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 8h3l2-2h6l2 2h3v10H4z"></path>
+                    <circle cx="12" cy="13" r="3"></circle>
+                </svg>
+            </button>
+            <button id="record" class="bg-purple-500 text-white p-2 rounded-lg active:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center" aria-label="录制" onclick="toggleRecording()" disabled>
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                    <circle cx="12" cy="12" r="6"></circle>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-1 mb-4 w-fit mx-auto place-items-center">
+        <div></div>
+        <button id="forward" class="bg-blue-500 text-white p-0 w-16 h-16 md:w-20 md:h-20 flex items-center justify-center rounded-lg active:bg-blue-700" aria-label="前进"
+                onpointerdown="startControl('forward')" onpointerup="stopControl()">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 md:w-8 md:h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4.5 15.75l7.5-7.5 7.5 7.5"></path>
+            </svg>
+        </button>
+        <div></div>
+        <button id="left" class="bg-blue-500 text-white p-0 w-16 h-16 md:w-20 md:h-20 flex items-center justify-center rounded-lg active:bg-blue-700" aria-label="左转"
+                onpointerdown="startControl('left')" onpointerup="stopControl()">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 md:w-8 md:h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15.75 4.5l-7.5 7.5 7.5 7.5"></path>
+            </svg>
+        </button>
+        <div class="flex items-center justify-center">
+            <button id="stop" class="bg-red-500 text-white p-0 w-16 h-16 md:w-20 md:h-20 flex items-center justify-center rounded-lg active:bg-red-700" aria-label="停止"
+                    onclick="MuststopControl()">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 md:w-8 md:h-8" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                    <rect x="7" y="7" width="10" height="10" rx="1"></rect>
+                </svg>
+            </button>
+        </div>
+        <button id="right" class="bg-blue-500 text-white p-0 w-16 h-16 md:w-20 md:h-20 flex items-center justify-center rounded-lg active:bg-blue-700" aria-label="右转"
+                onpointerdown="startControl('right')" onpointerup="stopControl()">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 md:w-8 md:h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8.25 4.5l7.5 7.5-7.5 7.5"></path>
+            </svg>
+        </button>
+        <div></div>
+        <button id="backward" class="bg-blue-500 text-white p-0 w-16 h-16 md:w-20 md:h-20 flex items-center justify-center rounded-lg active:bg-blue-700" aria-label="后退"
+                onpointerdown="startControl('backward')" onpointerup="stopControl()">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 md:w-8 md:h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19.5 8.25l-7.5 7.5-7.5-7.5"></path>
+            </svg>
+        </button>
+        <div></div>
+    </div>
+
+    <div class="w-full max-w-2xl mb-3 flex items-center justify-center gap-4">
+        <div class="flex items-center gap-2">
+            <label for="laser" class="text-xs font-medium text-gray-700" aria-label="激光">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M12 2v4M12 18v4M2 12h4M18 12h4"></path>
+                </svg>
+            </label>
+            <input type="range" id="laser" min="0" max="1" value="0" class="toggle"
+                   onchange="setLaser(this.value)">
+        </div>
+        <div class="flex items-center gap-2">
+            <label for="speed" class="text-xs font-medium text-gray-700 speed-label" aria-label="速度">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 13a8 8 0 0 1 16 0"></path>
+                    <path d="M12 12l4-3"></path>
+                </svg>
+            </label>
+            <input type="range" id="speed" min="10" max="60" value="20" class="speed-slider w-48 md:w-64"
+                   oninput="updateSpeed(this.value)" onchange="setSpeed()">
+            <span id="speed_value" class="w-10 text-right text-xs text-gray-700">20%</span>
+        </div>
+    </div>
+
+    <div class="w-full max-w-md bg-white p-2 rounded-lg shadow-md mb-2">
+        <h2 class="text-base font-semibold mb-2 text-gray-800">Status</h2>
+        <div class="grid grid-cols-2 gap-1 status-grid">
+            <div>
+                <p class="text-xs font-medium text-gray-700">WebSocket</p>
+                <p class="text-sm font-mono whitespace-nowrap truncate" aria-live="polite">
+                    <span id="ws-indicator" class="ws-indicator disconnected"></span>
+                    <span id="ws-status-text">Disconnected</span>
+                </p>
+            </div>
+            <div>
+                <p class="text-xs font-medium text-gray-700">延时</p>
+                <p class="text-sm font-mono whitespace-nowrap truncate"><span id="delay">0</span>ms</p>
+            </div>
+            <div>
+                <p class="text-xs font-medium text-gray-700">电量 / 功率</p>
+                <p class="text-sm font-mono whitespace-nowrap truncate"><span id="battery_percent">0.0</span>% <span class="mx-1 text-gray-400">|</span> <span id="power">0.00</span> W</p>
+            </div>
+            <div>
+                <p class="text-xs font-medium text-gray-700">电流 / 电压</p>
+                <p class="text-sm font-mono whitespace-nowrap truncate"><span id="current">0.00</span> A <span class="mx-1 text-gray-400">|</span> <span id="bus_voltage">0.00</span> V</p>
+            </div>
+            <div>
+                <p class="text-xs font-medium text-gray-700">CPU / 内存</p>
+                <p class="text-sm font-mono whitespace-nowrap truncate">
+                    <span id="cpu_percent">0.0</span>%
+                    <span class="mx-1 text-gray-400">|</span>
+                    <span id="mem_percent">0.0</span>%
+                </p>
+            </div>
+            <div>
+                <p class="text-xs font-medium text-gray-700">温度</p>
+                <p class="text-sm font-mono whitespace-nowrap truncate"><span id="cpu_temp">0.0</span>°C</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 休眠设置按钮（页面底部） -->
+    <div class="w-full max-w-2xl mt-2 mb-2">
+        <div class="flex justify-center">
+            <button id="open-sleep-modal" class="bg-gray-800 text-white px-4 py-2 rounded-lg active:bg-gray-900" onclick="openSleepModal()">
+                休眠设置
+            </button>
+        </div>
+    </div>
+
+    <!-- 休眠设置模态框 -->
+    <div id="sleep-modal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50 overflow-y-auto p-4">
+        <div id="sleep-modal-content" class="bg-white w-80 rounded-lg shadow-lg p-4 max-h-[80vh] overflow-y-auto">
+            <h3 class="text-base font-semibold mb-3 text-gray-800">设置休眠时长</h3>
+            <div class="mb-4">
+                <label for="sleep-hours" class="block text-sm text-gray-700 mb-1">休眠时长（小时）</label>
+                <input id="sleep-hours" type="number" min="1" max="72" step="1" value="1" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <p class="text-xs text-gray-500 mt-1">范围：1 - 72 小时</p>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button class="px-3 py-2 rounded-md bg-gray-200 text-gray-800" onclick="closeSleepModal()">取消</button>
+                <button id="confirm-sleep" class="px-3 py-2 rounded-md bg-blue-600 text-white active:bg-blue-700" onclick="confirmSleep()">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const slider = document.querySelector('.toggle');
+        slider.addEventListener('input', () => {
+            if (slider.value == 1) {
+                slider.classList.add('on');
+            } else {
+                slider.classList.remove('on');
+            }
+        });
+
+        const clientId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+        let ws = null;
+        let wsReconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+        const video = document.getElementById('video');
+        const videoPlaceholder = document.getElementById('video-placeholder');
+        let hls = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let isRecording = false;
+        let isStreaming = false;
+
+        function setVideoPlaceholderVisible(visible) {
+            if (!videoPlaceholder) return;
+            if (visible) {
+                videoPlaceholder.classList.remove('hidden');
+            } else {
+                videoPlaceholder.classList.add('hidden');
+            }
+        }
+
+        // 更新 WebSocket 状态指示灯
+        function updateWsStatus(status, text) {
+            const indicator = document.getElementById('ws-indicator');
+            const statusText = document.getElementById('ws-status-text');
+            indicator.className = `ws-indicator ${status}`;
+            statusText.innerText = text;
+        }
+
+        // Toast 工具
+        function showToast(message, { type = 'info', duration = 1800 } = {}) {
+            const root = document.getElementById('toast-root');
+            if (!root) return;
+            const item = document.createElement('div');
+            const classes = ['toast', 'toast-' + type];
+            item.className = classes.join(' ');
+            item.setAttribute('role', 'status');
+            item.innerHTML = message;
+            root.appendChild(item);
+            requestAnimationFrame(() => item.classList.add('show'));
+            const remove = () => {
+                item.classList.remove('show');
+                setTimeout(() => item.remove(), 180);
+            };
+            const timer = setTimeout(remove, duration);
+            item.addEventListener('click', () => { clearTimeout(timer); remove(); });
+        }
+
+        function initWebSocket() {
+            ws = new WebSocket('ws://10.0.0.229:8080/control');
+            updateWsStatus('disconnected', '连接中...');
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                showToast('已连接到控制服务', { type: 'success' });
+                updateWsStatus('connected', '已连接');
+                wsReconnectAttempts = 0;
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('WebSocket received:', data);
+                    if (data.status === 'ok') {
+                        navigator.vibrate?.(50);
+                    }
+                } catch (e) {
+                    console.error('WebSocket message error:', e);
+                }
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                updateWsStatus('disconnected', '已断开');
+                if (video) {
+                    video.pause();
+                }
+                if (hls) {
+                    hls.detachMedia();
+                    hls.destroy();
+                    hls = null;
+                }
+                if (isRecording) {
+                    stopRecording();
+                }
+                if (wsReconnectAttempts < maxReconnectAttempts) {
+                    wsReconnectAttempts++;
+                    setTimeout(initWebSocket, 1000 * wsReconnectAttempts);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateWsStatus('error', '错误');
+            };
+        }
+        function initHls(retryCount = 0) {
+            updateStatus();
+            const maxRetries = 10;
+            const retryDelay = 500; // 重试延迟（毫秒）
+            const streamUrl = 'http://10.0.0.229:8888/stream/index.m3u8';
+
+            // 启用lowLatencyMode需要ssl支持
+            if (Hls.isSupported()) {
+                hls = new Hls({
+                    liveSyncDurationCount: 1,
+                    liveMaxLatencyDurationCount: 2,
+                    maxBufferLength: 8,
+                    backBufferLength: 15,
+                    maxMaxBufferLength: 8,
+                    maxBufferHole: 0.5,
+                    liveDurationInfinity: true,
+                    lowLatencyMode: false,
+                    // lowLatencyMode: true,
+                    enableWorker: true,
+                });
+
+                hls.loadSource(streamUrl);
+                hls.attachMedia(video);
+
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.details === 'manifestLoadError' && retryCount < maxRetries) {
+                        console.warn(`m3u8 not ready, retrying... (${retryCount + 1}/${maxRetries})`);
+                        hls.destroy();
+                        setTimeout(() => initHls(retryCount + 1), retryDelay);
+                    } else {
+                        console.error('HLS error:', data);
+                    }
+                });
+
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    console.log('HLS manifest parsed successfully.');
+                    showToast('视频流就绪', { type: 'success' });
+                    video.play().catch(e => {
+                        console.error('Video play failed:', e);
+                        showToast('无法自动播放视频', { type: 'warn' });
+                    });
+
+                    // 启用按钮
+                    document.getElementById('snapshot').disabled = false;
+                    document.getElementById('record').disabled = false;
+                    isStreaming = true;
+                    setToggleStreamButton(true);
+                    document.getElementById('toggle_stream').disabled = false;
+                    setVideoPlaceholderVisible(false)
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = streamUrl;
+                video.addEventListener('loadedmetadata', () => {
+                    console.log('Native HLS loaded successfully.');
+                    video.play().catch(e => {
+                        console.error('Video play failed:', e);
+                    });
+
+                    // 启用按钮
+                    document.getElementById('snapshot').disabled = false;
+                    document.getElementById('record').disabled = false;
+                    isStreaming = true;
+                    setToggleStreamButton(true);
+                    document.getElementById('toggle_stream').disabled = false;
+                    setVideoPlaceholderVisible(false)
+                });
+            } else {
+                console.error('HLS is not supported in this browser.');
+            }
+        }
+
+        async function startStream() {
+            try {
+                const response = await fetch('/start_stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                console.log('Start stream:', data);
+                if (data.status === 'ok') {
+                    initHls();
+                    navigator.vibrate?.(50);
+                    showToast('已请求开启摄像头', { type: 'info' });
+                } else {
+                    showToast('开启摄像头失败', { type: 'error' });
+                    document.getElementById('toggle_stream').disabled = false;
+                }
+                // document.getElementById('toggle_stream').disabled = false;
+            } catch (e) {
+                console.error('Start stream error:', e);
+            }
+        }
+
+        async function stopStream() {
+            try {
+                const response = await fetch('/stop_stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({"client_id": clientId})
+                });
+                const data = await response.json();
+                console.log('Stop stream:', data);
+                if (data.status === 'ok') {
+                    video.pause();
+                    if (hls) {
+                        hls.detachMedia();
+                        hls.destroy();
+                        hls = null;
+                    }
+                    if (isRecording) {
+                        stopRecording();
+                    }
+                    document.getElementById('snapshot').disabled = true;
+                    document.getElementById('record').disabled = true;
+                    isStreaming = false;
+                    setToggleStreamButton(false);
+                    setVideoPlaceholderVisible(true);
+                    navigator.vibrate?.(50);
+                }
+                document.getElementById('toggle_stream').disabled = false;
+            } catch (e) {
+                console.error('Stop stream error:', e);
+            }
+        }
+
+        function setToggleStreamButton(streaming) {
+            const btn = document.getElementById('toggle_stream');
+            if (!btn) return;
+            if (streaming) {
+                // 切换为“关闭/停止”状态（方块图标，红色）
+                btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12" rx="1"></rect></svg>';
+                btn.className = 'bg-red-500 text-white p-2 rounded-lg active:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center';
+                btn.setAttribute('aria-label', '关闭摄像头');
+            } else {
+                // 切换为“打开/播放”状态（三角形图标，绿色）
+                btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="9,6 19,12 9,18"></polygon></svg>';
+                btn.className = 'bg-green-500 text-white p-2 rounded-lg active:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center';
+                btn.setAttribute('aria-label', '打开摄像头');
+            }
+        }
+
+        async function toggleStream() {
+            const btn = document.getElementById('toggle_stream');
+            if (!btn) return;
+            // btn.disabled = true;
+            if (!isStreaming) {
+                document.getElementById('toggle_stream').disabled = true;
+                await startStream();
+            } else {
+                document.getElementById('toggle_stream').disabled = true;
+                await stopStream();
+            }
+            // btn.disabled = false;
+        }
+
+        function takeSnapshot() {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+            canvas.toBlob(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `snapshot_${Date.now()}.png`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                navigator.vibrate?.(50);
+            }, 'image/png');
+        }
+
+        function toggleRecording() {
+            if (!isRecording) {
+                startRecording();
+            } else {
+                stopRecording();
+            }
+        }
+
+        function setRecordButtonVisual(recording) {
+            const btn = document.getElementById('record');
+            if (!btn) return;
+            if (recording) {
+                // 停止录制图标（圆圈+方块），按钮琥珀色，区别于停止播放的红色方块
+                btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle><rect x="9" y="9" width="6" height="6" fill="currentColor" stroke="none" rx="1"></rect></svg>';
+                btn.className = 'bg-amber-500 text-white p-2 rounded-lg active:bg-amber-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center';
+                btn.setAttribute('aria-label', '停止录制');
+            } else {
+                // 录制图标（圆点），按钮紫色
+                btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="12" r="6"></circle></svg>';
+                btn.className = 'bg-purple-500 text-white p-2 rounded-lg active:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center';
+                btn.setAttribute('aria-label', '录制');
+            }
+        }
+
+        function startRecording() {
+            if (!video.srcObject && !video.captureStream && !video.mozCaptureStream) {
+                console.error('Video stream not available for recording');
+                return;
+            }
+            const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+            recordedChunks = [];
+            mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'video/webm;codecs=vp8'
+            });
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `recording_${Date.now()}.webm`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                navigator.vibrate?.(50);
+            };
+            mediaRecorder.start();
+            isRecording = true;
+            setRecordButtonVisual(true);
+            console.log('Recording started');
+            showToast('开始录制', { type: 'success' });
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder = null;
+                isRecording = false;
+                setRecordButtonVisual(false);
+                console.log('Recording stopped');
+                showToast('录制已保存', { type: 'success' });
+            }
+        }
+
+        function sendControl(action) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action }));
+                console.log(`Sent ${action} via WebSocket`);
+                return true;
+            } else {
+                console.error(`WebSocket not connected, cannot send ${action}`);
+                return false;
+            }
+        }
+
+        function startControl(action) {
+            sendControl(action);
+        }
+
+        function stopControl() {
+            sendControl('stop');
+        }
+
+        async function MuststopControl() {
+            try {
+                const response = await fetch('/control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'stop' })
+                });
+                const data = await response.json();
+                console.log('Sent stop:', data);
+                navigator.vibrate?.(50);
+            } catch (e) {
+                console.error('Stop control error:', e);
+            }
+        }
+
+        async function setSpeed() {
+            const speed = parseInt(document.getElementById('speed').value);
+            try {
+                const response = await fetch('/set_speed', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ speed })
+                });
+                const data = await response.json();
+                console.log('Set speed:', data);
+                navigator.vibrate?.(50);
+                if (data.status === 'ok') {
+                    showToast('速度已更新', { type: 'success' });
+                } else {
+                    showToast('速度更新失败', { type: 'error' });
+                }
+            } catch (e) {
+                console.error('Set speed error:', e);
+            }
+        }
+
+        function updateSpeed(value) {
+            const labelEl = document.getElementById('speed_value');
+            if (labelEl) labelEl.textContent = `${value}%`;
+        }
+
+        async function setBitrate(mbps) {
+            try {
+                const res = await fetch('/set_bitrate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mbps: parseInt(mbps, 10) })
+                });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    showToast(`码率已设置为 ${mbps} Mbps，下次生效`, { type: 'success' });
+                } else {
+                    showToast(data.message || '设置码率失败', { type: 'error' });
+                }
+            } catch (e) {
+                console.error('Set bitrate error:', e);
+                showToast('设置码率失败', { type: 'error' });
+            }
+        }
+
+        function onBitrateChange(sel) {
+            const selectEl = sel || document.getElementById('bitrate_select');
+            if (!selectEl) return;
+            const mbps = selectEl.value;
+            selectEl.disabled = true;
+            setBitrate(mbps).finally(() => {
+                selectEl.disabled = false;
+            });
+        }
+
+        async function setLaser(state) {
+            try {
+                const response = await fetch('/set_laser', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ state: parseInt(state) })
+                });
+                const data = await response.json();
+                console.log('Set laser:', data);
+                navigator.vibrate?.(50);
+                if (data.status === 'ok') {
+                    showToast(`激光已${parseInt(state) ? '开启' : '关闭'}`, { type: 'success' });
+                } else {
+                    showToast('激光设置失败', { type: 'error' });
+                }
+            } catch (e) {
+                console.error('Set laser error:', e);
+            }
+        }
+
+        // 基于开路电压的 3S 锂电电量估算（分段线性插值）
+        // 注意：负载下电压会下跌
+        let smoothedVoltage = null;
+        function estimateSocFromVoltage(packVoltage, cellCount = 3) {
+            if (!isFinite(packVoltage) || packVoltage <= 0) return 0;
+            const voltagePerCell = packVoltage / cellCount;
+            const table = [
+                { v: 4.20, p: 100 },
+                { v: 4.10, p: 90 },
+                { v: 4.00, p: 80 },
+                { v: 3.92, p: 70 },
+                { v: 3.85, p: 60 },
+                { v: 3.79, p: 50 },
+                { v: 3.72, p: 40 },
+                { v: 3.66, p: 30 },
+                { v: 3.60, p: 20 },
+                { v: 3.54, p: 10 },
+                { v: 3.45, p: 5 },
+                { v: 3.30, p: 0 },
+            ];
+            if (voltagePerCell >= table[0].v) return 100;
+            if (voltagePerCell <= table[table.length - 1].v) return 0;
+            for (let i = 0; i < table.length - 1; i++) {
+                const a = table[i];
+                const b = table[i + 1];
+                if (voltagePerCell <= a.v && voltagePerCell >= b.v) {
+                    const t = (voltagePerCell - b.v) / (a.v - b.v);
+                    return Math.round(b.p + t * (a.p - b.p));
+                }
+            }
+            return 0;
+        }
+
+        async function updateStatus() {
+            try {
+                const t1 = Date.now();
+                const response = await fetch('/status_and_heartbeat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ client_id: clientId })
+                });
+                const t4 = Date.now();
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    const voltage = parseFloat(data.bus_voltage);
+                    const current = parseFloat(data.current);
+                    document.getElementById('bus_voltage').innerText = isFinite(voltage) ? voltage.toFixed(2) : '0.00';
+                    document.getElementById('current').innerText = isFinite(current) ? current.toFixed(2) : '0.00';
+                    // 计算功率: 电压(V) × 电流(A) = 功率(W)
+                    const power = (isFinite(voltage) && isFinite(current)) ? (voltage * current) : 0;
+                    const powerElem = document.getElementById('power');
+                    if (powerElem) powerElem.innerText = power.toFixed(2);
+                    // 用电压估算 3S 电量百分比（带平滑）
+                    if (isFinite(voltage)) {
+                        smoothedVoltage = smoothedVoltage == null ? voltage : (0.7 * smoothedVoltage + 0.3 * voltage);
+                        const soc = estimateSocFromVoltage(smoothedVoltage, 3);
+                        document.getElementById('battery_percent').innerText = soc.toFixed(0);
+                    }
+                    document.getElementById('cpu_percent').innerText = data.cpu_percent;
+                    document.getElementById('mem_percent').innerText = data.mem_percent;
+                    document.getElementById('cpu_temp').innerText = data.cpu_temp;
+                    const t2 = data.t2;
+                    const t3 = data.t3;
+                    const delay = t2 && t3 ? Math.round(((t2 - t1) + (t4 - t3)) / 2) : 0;
+                    document.getElementById('delay').innerText = Math.max(0, delay);
+                }
+                console.log('Status update:', data);
+            } catch (e) {
+                console.error('Status update error:', e);
+            }
+        }
+
+        initWebSocket();
+        setInterval(updateStatus, 2000);
+        // 初始化速度值（右侧显示）
+        updateSpeed(document.getElementById('speed').value);
+        // 初始化录制按钮为“录制”图标
+        setRecordButtonVisual(false);
+
+        window.addEventListener('beforeunload', () => {
+            try {
+                fetch('/control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'stop' })
+                });
+                fetch('/stop_stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({"client_id": clientId})
+                });
+                fetch('/set_laser', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ state: 0 })
+                });
+            } catch (e) {
+                console.error('Stop on unload error:', e);
+            }
+        });
+
+        // 休眠设置：模态框控制与提交
+        function openSleepModal() {
+            const modal = document.getElementById('sleep-modal');
+            if (modal) {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                attachSleepModalKeyboardHandlers();
+                // 延迟以确保样式应用后再聚焦与滚动
+                setTimeout(() => {
+                    document.getElementById('sleep-hours')?.focus();
+                    document.getElementById('sleep-modal-content')?.scrollIntoView({ block: 'center', inline: 'nearest' });
+                }, 50);
+            }
+        }
+
+        function closeSleepModal() {
+            const modal = document.getElementById('sleep-modal');
+            if (modal) {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                modal.style.paddingBottom = '';
+            }
+        }
+
+        // 使模态框在移动端软键盘弹出时保持可见
+        let sleepModalHandlersAttached = false;
+        function attachSleepModalKeyboardHandlers() {
+            if (sleepModalHandlersAttached) return;
+            sleepModalHandlersAttached = true;
+            const modal = document.getElementById('sleep-modal');
+            const content = document.getElementById('sleep-modal-content');
+            const input = document.getElementById('sleep-hours');
+
+            if (input) {
+                input.addEventListener('focus', () => {
+                    setTimeout(() => {
+                        content?.scrollIntoView({ block: 'center', inline: 'nearest' });
+                        input.scrollIntoView({ block: 'center', inline: 'nearest' });
+                    }, 100);
+                });
+            }
+
+            if (window.visualViewport) {
+                const onVvChange = () => {
+                    if (!modal || modal.classList.contains('hidden')) return;
+                    const keyboard = window.innerHeight - (visualViewport?.height || window.innerHeight);
+                    const pad = keyboard > 0 ? keyboard + 24 : 16;
+                    modal.style.paddingBottom = pad + 'px';
+                    const active = document.activeElement;
+                    if (active && modal.contains(active)) {
+                        active.scrollIntoView({ block: 'center', inline: 'nearest' });
+                    }
+                };
+                visualViewport.addEventListener('resize', onVvChange);
+                visualViewport.addEventListener('scroll', onVvChange);
+            }
+        }
+
+        async function confirmSleep() {
+            const btn = document.getElementById('confirm-sleep');
+            const input = document.getElementById('sleep-hours');
+            if (!input) return;
+            let hours = parseInt(input.value, 10);
+            if (!Number.isFinite(hours)) {
+                showToast('请输入有效的数字', { type: 'error' });
+                return;
+            }
+            if (hours < 1 || hours > 72) {
+                showToast('时长范围为 1-72 小时', { type: 'warn' });
+                return;
+            }
+            try {
+                if (btn) btn.disabled = true;
+                const res = await fetch('/sleep', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hours })
+                });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    showToast('已设置休眠，设备即将进入休眠', { type: 'success' });
+                    closeSleepModal();
+                } else {
+                    showToast(data.message || '设置休眠失败', { type: 'error' });
+                }
+            } catch (e) {
+                console.error('Sleep request error:', e);
+                showToast('请求失败', { type: 'error' });
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

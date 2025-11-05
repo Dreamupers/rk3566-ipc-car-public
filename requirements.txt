@@ -1,0 +1,4 @@
+flask>=2.2
+websockets>=11.0
+psutil>=5.9
+

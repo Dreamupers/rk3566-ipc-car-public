@@ -1,0 +1,14 @@
+{
+  "name": "RK3566 IPC Car",
+  "short_name": "IPC Car",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3f4f6",
+  "theme_color": "#f3f4f6",
+  "icons": [
+    { "src": "/static/icon_128.png", "sizes": "128x128", "type": "image/png" },
+    { "src": "/static/icon_256.png", "sizes": "256x256", "type": "image/png" }
+  ]
+}
