@@ -1,5 +1,7 @@
 # 基于Radxa ZERO 3W（RK3566）的 WIFI/4G 遥控摄像头小车（咪咪监控版）
 
+![1762438880456](image/README/1762438880456.png)
+
 ### 基本功能
 
 * Web远程操控
@@ -37,5 +39,14 @@
 ### 线路连接
 
 ### 软件配置
+
+1. USB转TTL连接电脑，烧录镜像，安装操作系统，推荐使用 5.10 内核: [radxa-zero3_debian_bullseye_xfce_b6](https://github.com/radxa-build/radxa-zero3/releases/download/b6/radxa-zero3_debian_bullseye_xfce_b6.img.xz)，参考[安装操作系统 | Radxa Docs](https://docs.radxa.com/zero/zero3/getting-started/install-os)
+2. 配置WiFi网络，[网络设置 | Radxa Docs](https://docs.radxa.com/zero/zero3/radxa-os/network)，测试SSH连接后，可移除USB转TTL
+3. 配置rsetup，打开I2C，PWM，CSI摄像头接口，参考[rsetup | Radxa Docs](https://docs.radxa.com/zero/zero3/os-config/rsetup)
+4. 确认python安装情况，pip安装 `Flask`，`python-periphery`，`psutil`，`websockets`
+5. 编译安装 ffmpeg-rockchip，构建 rkmpp 和 librga 后构建 ffmpeg-rockchip，以便进行硬件编码，参考[Compilation · nyanmisaka/ffmpeg-rockchip Wiki](https://github.com/nyanmisaka/ffmpeg-rockchip/wiki/Compilation)，[RTSP 推流 | Radxa Docs](https://docs.radxa.com/zero/zero3/app-development/rtsp)
+6. 下载mediamtx，[Releases · bluenviron/mediamtx](https://github.com/bluenviron/mediamtx/releases)，并将二进制文件放在 `rk3566-ipc-car-public\rtsp`
+7. 确认接线无误后分别运行 `motor.py`和 `vc.py`测试电机驱动，激光灯和电流计正常工作
+8. 运行代码：`python ws_main.py`，打开浏览器 `http://IP:9090`
 
 ### 其他
