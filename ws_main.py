@@ -342,7 +342,7 @@ def start_stream():
         kill_existing_processes('mediamtx')
         kill_existing_processes('ffmpeg')
         
-        mediamtx_proc = subprocess.Popen(['/home/radxa/rk3566-ipc-car/rtsp/mediamtx', '/home/radxa/rk3566-ipc-car/rtsp/mediamtx.yml'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        mediamtx_proc = subprocess.Popen(['/home/radxa/rk3566-ipc-car-public/rtsp/mediamtx', '/home/radxa/rk3566-ipc-car-public/rtsp/mediamtx.yml'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for _ in range(10):
             if psutil.pid_exists(mediamtx_proc.pid):
                 break
@@ -350,7 +350,7 @@ def start_stream():
         else:
             return jsonify({'status': 'error', 'message': 'Failed to start MediaMTX'}), 500
         try:
-            with open('/home/radxa/rk3566-ipc-car/rtsp/ffmpeg_cmd.json', 'r') as f:
+            with open('/home/radxa/rk3566-ipc-car-public/rtsp/ffmpeg_cmd.json', 'r') as f:
                 ffmpeg_cmd = json.load(f)['cmd']
         except Exception as e:
             logger.exception(f"Error loading ffmpeg_cmd.json: {e}")
